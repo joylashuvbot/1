@@ -1,10 +1,10 @@
 import os
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://anketabot.github.io/tanishuvweb/")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8647959441:AAFZ-8CaYu-gH0lNoWa9w_TVx4eXyrSHqrk")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:IAQKJZcjkVfuycAZwaeGmJimFzYOyNHF@thomas.proxy.rlwy.net:44630/railway")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://asliddinx278-ops.github.io/88/")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "LoveBot!2026!StrongPass")
 
 # Guruh sozlamalari
-GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "-1003888172359")) if os.getenv("GROUP_CHAT_ID") else None
-GROUP_INVITE_LINK = os.getenv("GROUP_INVITE_LINK", "https://t.me/+HA4J8P7lht0zZTdi")
+GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "-1003097266971")) if os.getenv("GROUP_CHAT_ID") else None
+GROUP_INVITE_LINK = os.getenv("GROUP_INVITE_LINK", "https://t.me/asssssssslw")
