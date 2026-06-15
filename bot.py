@@ -17,10 +17,13 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 
 import database as db
-from config import BOT_TOKEN, WEBAPP_URL, ADMIN_PASSWORD, GROUP_CHAT_ID, GROUP_INVITE_LINK
+from config import BOT_TOKEN, WEBAPP_URL, ADMIN_PASSWORD, GROUP_CHAT_ID, GROUP_INVITE_LINK, BOT_INSTANCE_ID, API_BASE_URL
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Bot instance identifier - har bir bot alohida
+logger.info(f"🤖 Bot instance ishga tushdi: {BOT_INSTANCE_ID}")
 
 # ========== BURJ SOZLAMALARI ==========
 
@@ -218,7 +221,7 @@ def get_photo_input(user):
 
 async def main_menu_keyboard():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌐 Web App", web_app=WebAppInfo(url=f"{WEBAPP_URL}/index.html"))],
+        [InlineKeyboardButton(text="🌐 Web App", web_app=WebAppInfo(url=f"{WEBAPP_URL}/index.html?bot_instance={BOT_INSTANCE_ID}"))],
         [InlineKeyboardButton(text="👤 Mening anketam", callback_data="show_profile")],
         [InlineKeyboardButton(text="🔎 Qidirish", callback_data="start_search")],
         [InlineKeyboardButton(text="👥 Guruhga qo'shilish", url=GROUP_INVITE_LINK if GROUP_INVITE_LINK else f"https://t.me/{(await bot.me()).username}")]
@@ -426,7 +429,7 @@ async def start_handler(message: types.Message):
 
     # Har bir tugma alohida qatorda - builder.row() ishlatiladi
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🌐 Web App", web_app=WebAppInfo(url=f"{WEBAPP_URL}/index.html")))
+    builder.row(InlineKeyboardButton(text="🌐 Web App", web_app=WebAppInfo(url=f"{WEBAPP_URL}/index.html?bot_instance={BOT_INSTANCE_ID}")))
     builder.row(InlineKeyboardButton(text="👤 Mening anketam", callback_data="show_profile"))
     builder.row(InlineKeyboardButton(text="🔎 Qidirish", callback_data="start_search"))
     builder.row(InlineKeyboardButton(text="👥 Guruhga qo'shilish", url=GROUP_INVITE_LINK if GROUP_INVITE_LINK else f"https://t.me/{(await bot.me()).username}"))
