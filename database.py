@@ -1,14 +1,58 @@
 import asyncpg
 import json
 from datetime import datetime, date, timedelta
-from config import DATABASE_URL
+from config import DATABASE_URL, BOT_INSTANCE_ID
 
+
+
+
+# ========== ZODIAC UTILITIES (database.py uchun) ==========
+
+ZODIAC_KEY_TO_NAMES = {
+    "qoy": ["Qo'y", "Qo'y (Aries)", "Aries", "♈", "qoy", "qo'y", "qo`y"],
+    "buzoq": ["Buqa", "Buzoq", "Buqa (Taurus)", "Taurus", "♉", "buzoq", "buqa"],
+    "egizak": ["Egizak", "Egizaklar", "Egizaklar (Gemini)", "Gemini", "♊", "egizak", "egizaklar"],
+    "qisqichbaqa": ["Qisqichbaqa", "Qisqichbaqa (Cancer)", "Cancer", "♋", "qisqichbaqa"],
+    "arslon": ["Arslon", "Sher", "Sher (Leo)", "Leo", "♌", "arslon", "sher"],
+    "sunbula": ["Sunbula", "Qiz", "Qiz (Virgo)", "Virgo", "♍", "sunbula", "qiz"],
+    "tarozi": ["Tarozi", "Tarozi (Libra)", "Libra", "♎", "tarozi"],
+    "chayon": ["Chayon", "Chayonlar", "Chayonlar (Scorpio)", "Scorpio", "♏", "chayon", "chayonlar"],
+    "oqotar": ["O'qotar", "Yoy", "Yoy (Sagittarius)", "Sagittarius", "♐", "oqotar", "yoy"],
+    "tog_echkisi": ["Tog' echkisi", "Tog' echkisi (Capricorn)", "Capricorn", "♑", "tog echkisi", "tog' echkisi", "togʻ echkisi"],
+    "qovga": ["Qovg'a", "Qovunchi", "Qovunchi (Aquarius)", "Aquarius", "♒", "qovga", "qovg'a", "qovgʻa", "qovunchi"],
+    "baliq": ["Baliq", "Baliq (Pisces)", "Pisces", "♓", "baliq"],
+}
+
+ZODIAC_NAME_TO_KEY = {}
+for key, names in ZODIAC_KEY_TO_NAMES.items():
+    for name in names:
+        ZODIAC_NAME_TO_KEY[name.lower().replace('’', "'").replace('`', "'").replace('ʻ', "'")] = key
+
+
+def normalize_zodiac_name(value):
+    """Burj nomini canonical kalitga aylantirish uchun yordamchi."""
+    if not value:
+        return None
+
+    text = str(value)
+    text = text.replace('’', "'").replace('`', "'").replace('ʻ', "'")
+    text = text.replace('♈', '').replace('♉', '').replace('♊', '')
+    text = text.replace('♋', '').replace('♌', '').replace('♍', '')
+    text = text.replace('♎', '').replace('♏', '').replace('♐', '')
+    text = text.replace('♑', '').replace('♒', '').replace('♓', '')
+    text = text.replace('(', ' ').replace(')', ' ')
+    text = text.lower().strip()
+    text = ' '.join(text.split())
+
+    return ZODIAC_NAME_TO_KEY.get(text) or ZODIAC_NAME_TO_KEY.get(text.replace("'", ''))
 
 async def get_db():
+    """Har bir bot instance o'zining alohida database'iga ulanadi"""
     return await asyncpg.connect(DATABASE_URL)
 
 
 async def init_db():
+    """Database jadvallarini yaratish - har bir bot alohida"""
     conn = await get_db()
     try:
         # Asosiy users jadvali
@@ -28,8 +72,13 @@ async def init_db():
                 photo_base64 TEXT,
                 invited_friends INTEGER DEFAULT 0,
                 is_active BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW(),
+                bot_instance TEXT DEFAULT 'default'
             )
+        """)
+
+        await conn.execute("""
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS bot_instance TEXT DEFAULT 'default'
         """)
 
         await conn.execute("""
@@ -83,8 +132,13 @@ async def init_db():
                 from_user BIGINT NOT NULL,
                 to_user BIGINT NOT NULL,
                 created_at TIMESTAMP DEFAULT NOW(),
+                bot_instance TEXT DEFAULT 'default',
                 UNIQUE(from_user, to_user)
             )
+        """)
+
+        await conn.execute("""
+            ALTER TABLE likes ADD COLUMN IF NOT EXISTS bot_instance TEXT DEFAULT 'default'
         """)
 
         # Matches
@@ -94,8 +148,13 @@ async def init_db():
                 user1 BIGINT NOT NULL,
                 user2 BIGINT NOT NULL,
                 created_at TIMESTAMP DEFAULT NOW(),
+                bot_instance TEXT DEFAULT 'default',
                 UNIQUE(user1, user2)
             )
+        """)
+
+        await conn.execute("""
+            ALTER TABLE matches ADD COLUMN IF NOT EXISTS bot_instance TEXT DEFAULT 'default'
         """)
 
         # Blocks
@@ -105,8 +164,13 @@ async def init_db():
                 blocker BIGINT NOT NULL,
                 blocked BIGINT NOT NULL,
                 created_at TIMESTAMP DEFAULT NOW(),
+                bot_instance TEXT DEFAULT 'default',
                 UNIQUE(blocker, blocked)
             )
+        """)
+
+        await conn.execute("""
+            ALTER TABLE blocks ADD COLUMN IF NOT EXISTS bot_instance TEXT DEFAULT 'default'
         """)
 
         # Chat messages
@@ -117,11 +181,14 @@ async def init_db():
                 sender_id BIGINT NOT NULL,
                 message TEXT NOT NULL,
                 is_read BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW(),
+                bot_instance TEXT DEFAULT 'default'
             )
         """)
 
-        # ========== YANGI JADVALLAR ==========
+        await conn.execute("""
+            ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS bot_instance TEXT DEFAULT 'default'
+        """)
 
         # Kunlik limitlar
         await conn.execute("""
@@ -131,11 +198,16 @@ async def init_db():
                 likes_used INTEGER DEFAULT 0,
                 messages_used INTEGER DEFAULT 0,
                 super_likes_used INTEGER DEFAULT 0,
-                limit_date DATE DEFAULT CURRENT_DATE
+                limit_date DATE DEFAULT CURRENT_DATE,
+                bot_instance TEXT DEFAULT 'default'
             )
         """)
 
-        # Referral rewards - guruhga odam qo'shish orqali bonus
+        await conn.execute("""
+            ALTER TABLE daily_limits ADD COLUMN IF NOT EXISTS bot_instance TEXT DEFAULT 'default'
+        """)
+
+        # Referral rewards
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS referral_rewards (
                 id BIGSERIAL PRIMARY KEY,
@@ -143,69 +215,94 @@ async def init_db():
                 referral_count INTEGER DEFAULT 0,
                 unlimited_until TIMESTAMP,
                 created_at TIMESTAMP DEFAULT NOW(),
-                updated_at TIMESTAMP DEFAULT NOW()
+                updated_at TIMESTAMP DEFAULT NOW(),
+                bot_instance TEXT DEFAULT 'default'
             )
         """)
 
-        # Referral tracking
+        await conn.execute("""
+            ALTER TABLE referral_rewards ADD COLUMN IF NOT EXISTS bot_instance TEXT DEFAULT 'default'
+        """)
+
+        # Referrals
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS referrals (
                 id BIGSERIAL PRIMARY KEY,
                 referrer_id BIGINT NOT NULL,
                 referred_id BIGINT NOT NULL,
                 created_at TIMESTAMP DEFAULT NOW(),
+                bot_instance TEXT DEFAULT 'default',
                 UNIQUE(referred_id)
             )
         """)
 
-        # Guruhga a'zo bo'lishlarini kuzatish
+        await conn.execute("""
+            ALTER TABLE referrals ADD COLUMN IF NOT EXISTS bot_instance TEXT DEFAULT 'default'
+        """)
+
+        # Group members
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS group_members (
                 id BIGSERIAL PRIMARY KEY,
                 telegram_id BIGINT UNIQUE NOT NULL,
                 invited_by BIGINT,
-                joined_at TIMESTAMP DEFAULT NOW()
+                joined_at TIMESTAMP DEFAULT NOW(),
+                bot_instance TEXT DEFAULT 'default'
             )
         """)
 
-        # Guruhga odam qo'shishlarini kuzatish (referral)
+        await conn.execute("""
+            ALTER TABLE group_members ADD COLUMN IF NOT EXISTS bot_instance TEXT DEFAULT 'default'
+        """)
+
+        # Group invites
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS group_invites (
                 id BIGSERIAL PRIMARY KEY,
                 inviter_id BIGINT NOT NULL,
                 invited_id BIGINT NOT NULL,
                 invited_at TIMESTAMP DEFAULT NOW(),
+                bot_instance TEXT DEFAULT 'default',
                 UNIQUE(inviter_id, invited_id)
             )
+        """)
+
+        await conn.execute("""
+            ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS bot_instance TEXT DEFAULT 'default'
         """)
 
     finally:
         await conn.close()
 
 
+# ========== BOT INSTANCE FILTER ==========
+# Har bir query'da bot_instance = BOT_INSTANCE_ID sharti qo'shiladi
+# Bu hatto bitta database'da ham alohidalikni ta'minlaydi (tavsiya etilmaydi)
+# ENG YAXSHI YECHIM: Har bir bot uchun alohida database!
+
+
 # ========== DAILY LIMITS ==========
 
 async def get_daily_limits(telegram_id):
-    """Bugungi kunlik limitlarni olish. Agar yangi kundaligi bo'lsa, reset qiladi."""
+    """Bugungi kunlik limitlarni olish."""
     conn = await get_db()
     try:
-        # Avval oldingi recordni olish
         row = await conn.fetchrow(
-            "SELECT likes_used, messages_used, super_likes_used, limit_date FROM daily_limits WHERE telegram_id = $1",
-            telegram_id
+            """SELECT likes_used, messages_used, super_likes_used, limit_date 
+               FROM daily_limits 
+               WHERE telegram_id = $1 AND bot_instance = $2""",
+            telegram_id, BOT_INSTANCE_ID
         )
 
         today = date.today()
 
         if row:
-            # Yangi kunmi tekshirish
             if row['limit_date'] < today:
-                # Reset kunlik limitlar
                 await conn.execute(
                     """UPDATE daily_limits
                        SET likes_used = 0, messages_used = 0, super_likes_used = 0, limit_date = $1
-                       WHERE telegram_id = $2""",
-                    today, telegram_id
+                       WHERE telegram_id = $2 AND bot_instance = $3""",
+                    today, telegram_id, BOT_INSTANCE_ID
                 )
                 return {'likes_used': 0, 'messages_used': 0, 'super_likes_used': 0}
             return {
@@ -214,10 +311,10 @@ async def get_daily_limits(telegram_id):
                 'super_likes_used': row['super_likes_used']
             }
         else:
-            # Yangi record yaratish
             await conn.execute(
-                "INSERT INTO daily_limits (telegram_id, likes_used, messages_used, super_likes_used, limit_date) VALUES ($1, 0, 0, 0, $2)",
-                telegram_id, today
+                """INSERT INTO daily_limits (telegram_id, likes_used, messages_used, super_likes_used, limit_date, bot_instance) 
+                   VALUES ($1, 0, 0, 0, $2, $3)""",
+                telegram_id, today, BOT_INSTANCE_ID
             )
             return {'likes_used': 0, 'messages_used': 0, 'super_likes_used': 0}
     finally:
@@ -229,8 +326,9 @@ async def is_unlimited(telegram_id):
     conn = await get_db()
     try:
         row = await conn.fetchrow(
-            "SELECT unlimited_until FROM referral_rewards WHERE telegram_id = $1",
-            telegram_id
+            """SELECT unlimited_until FROM referral_rewards 
+               WHERE telegram_id = $1 AND bot_instance = $2""",
+            telegram_id, BOT_INSTANCE_ID
         )
         if row and row['unlimited_until']:
             return row['unlimited_until'] > datetime.now()
@@ -240,42 +338,32 @@ async def is_unlimited(telegram_id):
 
 
 async def check_and_increment_limit(telegram_id, limit_type):
-    """
-    Limitni tekshirish va oshirish.
-    limit_type: 'likes', 'messages', 'super_likes'
-    Agar limit tugagan bo'lsa False, aks holda True qaytaradi.
-    """
-    # Avval limitsiz ekanligini tekshirish
+    """Limitni tekshirish va oshirish"""
     unlimited = await is_unlimited(telegram_id)
     if unlimited:
-        return True  # Limitsiz foydalanuvchi - cheklov yo'q
+        return True
 
-    # Kunlik limitlarni olish
     limits = await get_daily_limits(telegram_id)
 
-    # Default limitlar
     MAX_LIKES = 25
     MAX_MESSAGES = 10
     MAX_SUPER_LIKES = 10
 
     if limit_type == 'likes':
         if limits['likes_used'] >= MAX_LIKES:
-            return False  # Limit tugagan
+            return False
         await _increment_limit(telegram_id, 'likes_used')
         return True
-
     elif limit_type == 'messages':
         if limits['messages_used'] >= MAX_MESSAGES:
             return False
         await _increment_limit(telegram_id, 'messages_used')
         return True
-
     elif limit_type == 'super_likes':
         if limits['super_likes_used'] >= MAX_SUPER_LIKES:
             return False
         await _increment_limit(telegram_id, 'super_likes_used')
         return True
-
     return False
 
 
@@ -286,8 +374,8 @@ async def _increment_limit(telegram_id, column):
         await conn.execute(
             f"""UPDATE daily_limits
                 SET {column} = {column} + 1
-                WHERE telegram_id = $1""",
-            telegram_id
+                WHERE telegram_id = $1 AND bot_instance = $2""",
+            telegram_id, BOT_INSTANCE_ID
         )
     finally:
         await conn.close()
@@ -323,63 +411,60 @@ async def get_limit_status(telegram_id):
 # ========== REFERRAL REWARDS ==========
 
 async def process_referral(referrer_id, referred_id):
-    """
-    Yangi referral qayta ishlash.
-    Returns: (success, reward_text)
-    """
+    """Yangi referral qayta ishlash"""
     conn = await get_db()
     try:
-        # Avval referred_id avval referral qilganini tekshirish
         existing = await conn.fetchrow(
-            "SELECT id FROM referrals WHERE referred_id = $1", referred_id
+            """SELECT id FROM referrals 
+               WHERE referred_id = $1 AND bot_instance = $2""",
+            referred_id, BOT_INSTANCE_ID
         )
         if existing:
             return False, "Bu foydalanuvchi avval referral qilgan."
 
-        # O'zini o'zi qo'shishni oldini olish
         if referrer_id == referred_id:
             return False, "O'zingizni qo'sha olmaysiz."
 
-        # Referralni saqlash
         await conn.execute(
-            "INSERT INTO referrals (referrer_id, referred_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-            referrer_id, referred_id
+            """INSERT INTO referrals (referrer_id, referred_id, bot_instance) 
+               VALUES ($1, $2, $3) ON CONFLICT DO NOTHING""",
+            referrer_id, referred_id, BOT_INSTANCE_ID
         )
 
-        # Referral count ni oshirish
         await conn.execute("""
-            INSERT INTO referral_rewards (telegram_id, referral_count, updated_at)
-            VALUES ($1, 1, NOW())
+            INSERT INTO referral_rewards (telegram_id, referral_count, updated_at, bot_instance)
+            VALUES ($1, 1, NOW(), $2)
             ON CONFLICT (telegram_id) DO UPDATE SET
                 referral_count = referral_rewards.referral_count + 1,
                 updated_at = NOW()
-        """, referrer_id)
+            WHERE referral_rewards.bot_instance = $2
+        """, referrer_id, BOT_INSTANCE_ID)
 
-        # Reward berish
         row = await conn.fetchrow(
-            "SELECT referral_count FROM referral_rewards WHERE telegram_id = $1",
-            referrer_id
+            """SELECT referral_count FROM referral_rewards 
+               WHERE telegram_id = $1 AND bot_instance = $2""",
+            referrer_id, BOT_INSTANCE_ID
         )
         count = row['referral_count'] if row else 0
 
-        # 5 ta = 1 hafta, 10 ta = 1 oy
         if count == 5:
             until = datetime.now() + timedelta(days=7)
             await conn.execute(
-                "UPDATE referral_rewards SET unlimited_until = $1 WHERE telegram_id = $2",
-                until, referrer_id
+                """UPDATE referral_rewards SET unlimited_until = $1 
+                   WHERE telegram_id = $2 AND bot_instance = $3""",
+                until, referrer_id, BOT_INSTANCE_ID
             )
             return True, f"🎉 Tabriklaymiz! {count} ta odam qo'shdingiz. 1 hafta limitsiz foydalanish!"
         elif count == 10:
             until = datetime.now() + timedelta(days=30)
             await conn.execute(
-                "UPDATE referral_rewards SET unlimited_until = $1 WHERE telegram_id = $2",
-                until, referrer_id
+                """UPDATE referral_rewards SET unlimited_until = $1 
+                   WHERE telegram_id = $2 AND bot_instance = $3""",
+                until, referrer_id, BOT_INSTANCE_ID
             )
             return True, f"🎉 Ajoyib! {count} ta odam qo'shdingiz. 1 oy limitsiz foydalanish!"
 
         return True, f"✅ {count} ta odam qo'shildi. 5 tagacha: 1 hafta, 10 tagacha: 1 oy limitsiz."
-
     finally:
         await conn.close()
 
@@ -389,8 +474,9 @@ async def get_referral_status(telegram_id):
     conn = await get_db()
     try:
         row = await conn.fetchrow(
-            "SELECT referral_count, unlimited_until FROM referral_rewards WHERE telegram_id = $1",
-            telegram_id
+            """SELECT referral_count, unlimited_until FROM referral_rewards 
+               WHERE telegram_id = $1 AND bot_instance = $2""",
+            telegram_id, BOT_INSTANCE_ID
         )
         if row:
             return {
@@ -409,13 +495,14 @@ async def get_referral_link(telegram_id, bot_username):
 
 
 async def touch_user_activity(telegram_id):
-    """Daily streak va faoliyat tarixini yangilash."""
+    """Daily streak va faoliyat tarixini yangilash"""
     conn = await get_db()
     try:
         today = date.today()
         row = await conn.fetchrow(
-            "SELECT daily_streak, last_active_date FROM users WHERE telegram_id = $1",
-            telegram_id,
+            """SELECT daily_streak, last_active_date FROM users 
+               WHERE telegram_id = $1 AND bot_instance = $2""",
+            telegram_id, BOT_INSTANCE_ID
         )
 
         if row:
@@ -428,17 +515,18 @@ async def touch_user_activity(telegram_id):
                 streak = streak + 1 if last_active == today - timedelta(days=1) else 1
 
             await conn.execute(
-                "UPDATE users SET daily_streak = $1, last_active_date = $2 WHERE telegram_id = $3",
-                streak,
-                today,
-                telegram_id,
+                """UPDATE users SET daily_streak = $1, last_active_date = $2 
+                   WHERE telegram_id = $3 AND bot_instance = $4""",
+                streak, today, telegram_id, BOT_INSTANCE_ID
             )
             return {'daily_streak': streak, 'last_active_date': today.isoformat()}
 
         await conn.execute(
-            "INSERT INTO users (telegram_id, daily_streak, last_active_date) VALUES ($1, 1, $2) ON CONFLICT (telegram_id) DO UPDATE SET daily_streak = users.daily_streak + 1, last_active_date = EXCLUDED.last_active_date",
-            telegram_id,
-            today,
+            """INSERT INTO users (telegram_id, daily_streak, last_active_date, bot_instance) 
+               VALUES ($1, 1, $2, $3) ON CONFLICT (telegram_id) DO UPDATE 
+               SET daily_streak = users.daily_streak + 1, last_active_date = EXCLUDED.last_active_date
+               WHERE users.bot_instance = $3""",
+            telegram_id, today, BOT_INSTANCE_ID
         )
         return {'daily_streak': 1, 'last_active_date': today.isoformat()}
     finally:
@@ -446,12 +534,13 @@ async def touch_user_activity(telegram_id):
 
 
 async def get_user_activity_stats(telegram_id):
-    """Foydalanuvchi faoliyat statistikasi."""
+    """Foydalanuvchi faoliyat statistikasi"""
     conn = await get_db()
     try:
         row = await conn.fetchrow(
-            "SELECT daily_streak, last_active_date, relationship_mode, ice_breaker FROM users WHERE telegram_id = $1",
-            telegram_id,
+            """SELECT daily_streak, last_active_date, relationship_mode, ice_breaker 
+               FROM users WHERE telegram_id = $1 AND bot_instance = $2""",
+            telegram_id, BOT_INSTANCE_ID
         )
         if row:
             return {
@@ -466,19 +555,16 @@ async def get_user_activity_stats(telegram_id):
 
 
 async def get_daily_recommendations(telegram_id, limit=5):
-    """Bugun uchun tavsiya qilingan profillar."""
+    """Bugun uchun tavsiya qilingan profillar"""
     conn = await get_db()
     try:
         rows = await conn.fetch(
-            """
-            SELECT telegram_id, username, full_name, gender, age, city, about, interests, zodiac, goals, photo_file_id, photo_base64
-            FROM users
-            WHERE telegram_id != $1 AND is_active = TRUE
-            ORDER BY random()
-            LIMIT $2
-            """,
-            telegram_id,
-            limit,
+            """SELECT telegram_id, username, full_name, gender, age, city, about, interests, zodiac, goals, photo_file_id, photo_base64
+               FROM users
+               WHERE telegram_id != $1 AND is_active = TRUE AND bot_instance = $3
+               ORDER BY random()
+               LIMIT $2""",
+            telegram_id, limit, BOT_INSTANCE_ID
         )
         return [dict(row) for row in rows]
     finally:
@@ -493,9 +579,9 @@ async def save_user(telegram_id, data):
         await conn.execute("""
             INSERT INTO users (
                 telegram_id, username, full_name, gender, age, city, about, interests,
-                zodiac, goals, photo_file_id, photo_base64, relationship_mode, ice_breaker
+                zodiac, goals, photo_file_id, photo_base64, relationship_mode, ice_breaker, bot_instance
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             ON CONFLICT (telegram_id) DO UPDATE SET
                 username = EXCLUDED.username,
                 full_name = EXCLUDED.full_name,
@@ -510,7 +596,9 @@ async def save_user(telegram_id, data):
                 photo_base64 = EXCLUDED.photo_base64,
                 relationship_mode = COALESCE(EXCLUDED.relationship_mode, users.relationship_mode),
                 ice_breaker = COALESCE(EXCLUDED.ice_breaker, users.ice_breaker),
-                is_active = TRUE
+                is_active = TRUE,
+                bot_instance = $15
+            WHERE users.bot_instance = $15
         """,
             telegram_id,
             data.get("username"),
@@ -525,7 +613,8 @@ async def save_user(telegram_id, data):
             data.get("photo_file_id"),
             data.get("photo_base64"),
             data.get("relationship_mode") or "romantic",
-            data.get("ice_breaker")
+            data.get("ice_breaker"),
+            BOT_INSTANCE_ID
         )
         return True
     except Exception as e:
@@ -538,7 +627,10 @@ async def save_user(telegram_id, data):
 async def get_user(telegram_id):
     conn = await get_db()
     try:
-        row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
+        row = await conn.fetchrow(
+            """SELECT * FROM users WHERE telegram_id = $1 AND bot_instance = $2""",
+            telegram_id, BOT_INSTANCE_ID
+        )
         if row:
             return dict(row)
         return None
@@ -550,8 +642,10 @@ async def search_users(telegram_id, filters):
     conn = await get_db()
     try:
         blocked_ids = await conn.fetch(
-            "SELECT blocked FROM blocks WHERE blocker = $1 UNION SELECT blocker FROM blocks WHERE blocked = $1",
-            telegram_id
+            """SELECT blocked FROM blocks WHERE blocker = $1 AND bot_instance = $3
+               UNION 
+               SELECT blocker FROM blocks WHERE blocked = $1 AND bot_instance = $3""",
+            telegram_id, BOT_INSTANCE_ID, BOT_INSTANCE_ID
         )
         excluded = [r["blocked"] for r in blocked_ids] + [telegram_id]
 
@@ -560,9 +654,10 @@ async def search_users(telegram_id, filters):
             FROM users
             WHERE telegram_id != ALL($1::bigint[])
             AND is_active = TRUE
+            AND bot_instance = $2
         """
-        params = [excluded]
-        idx = 2
+        params = [excluded, BOT_INSTANCE_ID]
+        idx = 3
 
         if filters.get("gender"):
             query += f" AND gender = ${idx}"
@@ -594,13 +689,11 @@ async def search_users(telegram_id, filters):
             params.append(filters["interests"])
             idx += 1
 
-        # Ism bo'yicha qidirish (yangi)
         if filters.get("name"):
             query += f" AND full_name ILIKE ${idx}"
             params.append(f"%{filters['name']}%")
             idx += 1
 
-        # Burj bo'yicha qidirish (to'g'ridan-to'g'ri)
         if filters.get("zodiac"):
             query += f" AND zodiac ILIKE ${idx}"
             params.append(f"%{filters['zodiac']}%")
@@ -609,10 +702,10 @@ async def search_users(telegram_id, filters):
         query += " LIMIT 50"
         rows = await conn.fetch(query, *params)
 
-        # Match va limit status
         match_rows = await conn.fetch(
-            "SELECT user1, user2 FROM matches WHERE user1 = $1 OR user2 = $1",
-            telegram_id
+            """SELECT user1, user2 FROM matches 
+               WHERE (user1 = $1 OR user2 = $1) AND bot_instance = $2""",
+            telegram_id, BOT_INSTANCE_ID
         )
         match_ids = set()
         for mr in match_rows:
@@ -629,62 +722,15 @@ async def search_users(telegram_id, filters):
         await conn.close()
 
 
-# Har bir burj kaliti uchun barcha mumkin nom variantlari
-# Bu ma'lumotlar bazasida turli formatlarda saqlangan burj nomlarini topish uchun
-ZODIAC_KEY_TO_NAMES = {
-    "qoy": ["Qo'y", "Qo'y (Aries)", "Aries", "♈", "qoy", "qo'y", "qo`y"],
-    "buzoq": ["Buqa", "Buzoq", "Buqa (Taurus)", "Taurus", "♉", "buzoq", "buqa"],
-    "egizak": ["Egizak", "Egizaklar", "Egizaklar (Gemini)", "Gemini", "♊", "egizak", "egizaklar"],
-    "qisqichbaqa": ["Qisqichbaqa", "Qisqichbaqa (Cancer)", "Cancer", "♋", "qisqichbaqa"],
-    "arslon": ["Arslon", "Sher", "Sher (Leo)", "Leo", "♌", "arslon", "sher"],
-    "sunbula": ["Sunbula", "Qiz", "Qiz (Virgo)", "Virgo", "♍", "sunbula", "qiz"],
-    "tarozi": ["Tarozi", "Tarozi (Libra)", "Libra", "♎", "tarozi"],
-    "chayon": ["Chayon", "Chayonlar", "Chayonlar (Scorpio)", "Scorpio", "♏", "chayon", "chayonlar"],
-    "oqotar": ["O'qotar", "Yoy", "Yoy (Sagittarius)", "Sagittarius", "♐", "oqotar", "yoy"],
-    "tog_echkisi": ["Tog' echkisi", "Tog' echkisi (Capricorn)", "Capricorn", "♑", "tog echkisi", "tog' echkisi", "togʻ echkisi"],
-    "qovga": ["Qovg'a", "Qovunchi", "Qovunchi (Aquarius)", "Aquarius", "♒", "qovga", "qovg'a", "qovgʻa", "qovunchi"],
-    "baliq": ["Baliq", "Baliq (Pisces)", "Pisces", "♓", "baliq"],
-}
-
-
-ZODIAC_NAME_TO_KEY = {}
-for key, names in ZODIAC_KEY_TO_NAMES.items():
-    for name in names:
-        ZODIAC_NAME_TO_KEY[name.lower().replace('’', "'").replace('`', "'").replace('ʻ', "'")] = key
-
-
-def normalize_zodiac_name(value):
-    """Burj nomini canonical kalitga aylantirish uchun yordamchi."""
-    if not value:
-        return None
-
-    text = str(value)
-    text = text.replace('’', "'").replace('`', "'").replace('ʻ', "'")
-    text = text.replace('♈', '').replace('♉', '').replace('♊', '')
-    text = text.replace('♋', '').replace('♌', '').replace('♍', '')
-    text = text.replace('♎', '').replace('♏', '').replace('♐', '')
-    text = text.replace('♑', '').replace('♒', '').replace('♓', '')
-    text = text.replace('(', ' ').replace(')', ' ')
-    text = text.lower().strip()
-    text = ' '.join(text.split())
-
-    return ZODIAC_NAME_TO_KEY.get(text) or ZODIAC_NAME_TO_KEY.get(text.replace("'", ''))
-
-
 async def search_users_by_zodiac(telegram_id, filters):
-    """
-    Burj mosligiga qarab foydalanuvchilarni qidirish.
-    filters: {
-        'zodiac_names': [...],  # Mos burjlar nomlari ro'yxati
-        'zodiac_keys': [...],   # Mos burjlar kalitlari (barcha nom variantlarini yig'ish uchun)
-        'gender': 'erkak'|'ayol'  # ixtiyoriy
-    }
-    """
+    """Burj mosligiga qarab foydalanuvchilarni qidirish"""
     conn = await get_db()
     try:
         blocked_ids = await conn.fetch(
-            "SELECT blocked FROM blocks WHERE blocker = $1 UNION SELECT blocker FROM blocks WHERE blocked = $1",
-            telegram_id
+            """SELECT blocked FROM blocks WHERE blocker = $1 AND bot_instance = $3
+               UNION 
+               SELECT blocker FROM blocks WHERE blocked = $1 AND bot_instance = $3""",
+            telegram_id, BOT_INSTANCE_ID, BOT_INSTANCE_ID
         )
         excluded = [r["blocked"] for r in blocked_ids] + [telegram_id]
 
@@ -693,13 +739,11 @@ async def search_users_by_zodiac(telegram_id, filters):
 
         all_names = set()
 
-        # Berilgan kalitlarni canonical nom variantlariga aylantiramiz
         if zodiac_keys:
             for key in zodiac_keys:
                 names = ZODIAC_KEY_TO_NAMES.get(key, [])
                 all_names.update(names)
 
-        # Berilgan nomlardan canonical kalitlarni topamiz va ularni ham kengaytiramiz
         for name in zodiac_names:
             key = normalize_zodiac_name(name)
             if key:
@@ -707,7 +751,6 @@ async def search_users_by_zodiac(telegram_id, filters):
             else:
                 all_names.add(name)
 
-        # Agar oldin faqat canonical kalitlar berilgan bo'lsa, ularni ham to'liq variantlariga kengaytiramiz
         if not all_names:
             for key in zodiac_keys:
                 all_names.update(ZODIAC_KEY_TO_NAMES.get(key, []))
@@ -723,12 +766,11 @@ async def search_users_by_zodiac(telegram_id, filters):
             WHERE telegram_id != ALL($1::bigint[])
             AND is_active = TRUE
             AND zodiac IS NOT NULL
+            AND bot_instance = $2
         """
-        params = [excluded]
-        idx = 2
+        params = [excluded, BOT_INSTANCE_ID]
+        idx = 3
 
-        # Mos burjlardan biri bilan zodiac mos kelishini tekshirish
-        # Har bir zodiac_name uchun ILIKE shartlari yozamiz
         like_conditions = []
         for name in zodiac_names:
             like_conditions.append(f"zodiac ILIKE ${idx}")
@@ -747,8 +789,9 @@ async def search_users_by_zodiac(telegram_id, filters):
         rows = await conn.fetch(query, *params)
 
         match_rows = await conn.fetch(
-            "SELECT user1, user2 FROM matches WHERE user1 = $1 OR user2 = $1",
-            telegram_id
+            """SELECT user1, user2 FROM matches 
+               WHERE (user1 = $1 OR user2 = $1) AND bot_instance = $2""",
+            telegram_id, BOT_INSTANCE_ID
         )
         match_ids = set()
         for mr in match_rows:
@@ -769,21 +812,23 @@ async def add_like(from_user, to_user):
     conn = await get_db()
     try:
         await conn.execute(
-            "INSERT INTO likes (from_user, to_user) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-            from_user, to_user
+            """INSERT INTO likes (from_user, to_user, bot_instance) 
+               VALUES ($1, $2, $3) ON CONFLICT DO NOTHING""",
+            from_user, to_user, BOT_INSTANCE_ID
         )
-        # Check mutual like
         mutual = await conn.fetchrow(
-            "SELECT id FROM likes WHERE from_user = $1 AND to_user = $2",
-            to_user, from_user
+            """SELECT id FROM likes 
+               WHERE from_user = $1 AND to_user = $2 AND bot_instance = $3""",
+            to_user, from_user, BOT_INSTANCE_ID
         )
         if mutual:
             u1, u2 = min(from_user, to_user), max(from_user, to_user)
             await conn.execute(
-                "INSERT INTO matches (user1, user2) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                u1, u2
+                """INSERT INTO matches (user1, user2, bot_instance) 
+                   VALUES ($1, $2, $3) ON CONFLICT DO NOTHING""",
+                u1, u2, BOT_INSTANCE_ID
             )
-            return True  # Match!
+            return True
         return False
     finally:
         await conn.close()
@@ -794,8 +839,9 @@ async def get_match_id(user1, user2):
     try:
         u1, u2 = min(user1, user2), max(user1, user2)
         row = await conn.fetchrow(
-            "SELECT id FROM matches WHERE user1 = $1 AND user2 = $2",
-            u1, u2
+            """SELECT id FROM matches 
+               WHERE user1 = $1 AND user2 = $2 AND bot_instance = $3""",
+            u1, u2, BOT_INSTANCE_ID
         )
         return row['id'] if row else None
     finally:
@@ -806,8 +852,9 @@ async def block_user(blocker, blocked):
     conn = await get_db()
     try:
         await conn.execute(
-            "INSERT INTO blocks (blocker, blocked) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-            blocker, blocked
+            """INSERT INTO blocks (blocker, blocked, bot_instance) 
+               VALUES ($1, $2, $3) ON CONFLICT DO NOTHING""",
+            blocker, blocked, BOT_INSTANCE_ID
         )
     finally:
         await conn.close()
@@ -817,8 +864,11 @@ async def get_all_users():
     conn = await get_db()
     try:
         rows = await conn.fetch(
-            "SELECT telegram_id, username, full_name, gender, age, city, about, interests, zodiac, goals, photo_file_id, photo_base64, invited_friends, created_at "
-            "FROM users WHERE is_active = TRUE ORDER BY created_at DESC"
+            """SELECT telegram_id, username, full_name, gender, age, city, about, interests, zodiac, goals, photo_file_id, photo_base64, invited_friends, created_at
+               FROM users 
+               WHERE is_active = TRUE AND bot_instance = $1 
+               ORDER BY created_at DESC""",
+            BOT_INSTANCE_ID
         )
         return [dict(row) for row in rows]
     finally:
@@ -829,12 +879,13 @@ async def get_user_stats():
     conn = await get_db()
     try:
         row = await conn.fetchrow(
-            "SELECT COUNT(*) AS total, "
-            "COUNT(*) FILTER (WHERE gender = 'erkak') AS male, "
-            "COUNT(*) FILTER (WHERE gender = 'ayol') AS female, "
-            "AVG(age) AS avg_age "
-            "FROM users "
-            "WHERE is_active = TRUE"
+            """SELECT COUNT(*) AS total, 
+                      COUNT(*) FILTER (WHERE gender = 'erkak') AS male, 
+                      COUNT(*) FILTER (WHERE gender = 'ayol') AS female, 
+                      AVG(age) AS avg_age 
+               FROM users 
+               WHERE is_active = TRUE AND bot_instance = $1""",
+            BOT_INSTANCE_ID
         )
         return dict(row) if row else {'total': 0, 'male': 0, 'female': 0, 'avg_age': None}
     finally:
@@ -845,10 +896,10 @@ async def get_top_cities(limit=10):
     conn = await get_db()
     try:
         rows = await conn.fetch(
-            "SELECT city, COUNT(*) AS count FROM users "
-            "WHERE city IS NOT NULL AND city <> '' AND is_active = TRUE "
-            "GROUP BY city ORDER BY count DESC LIMIT $1",
-            limit
+            """SELECT city, COUNT(*) AS count FROM users 
+               WHERE city IS NOT NULL AND city <> '' AND is_active = TRUE AND bot_instance = $2
+               GROUP BY city ORDER BY count DESC LIMIT $1""",
+            limit, BOT_INSTANCE_ID
         )
         return [dict(row) for row in rows]
     finally:
@@ -856,12 +907,14 @@ async def get_top_cities(limit=10):
 
 
 async def can_write(from_user, to_user):
-    """Allow messaging only if match exists."""
+    """Allow messaging only if match exists"""
     conn = await get_db()
     try:
         match = await conn.fetchrow(
-            "SELECT id FROM matches WHERE (user1 = $1 AND user2 = $2) OR (user1 = $2 AND user2 = $1)",
-            from_user, to_user
+            """SELECT id FROM matches 
+               WHERE ((user1 = $1 AND user2 = $2) OR (user1 = $2 AND user2 = $1)) 
+               AND bot_instance = $3""",
+            from_user, to_user, BOT_INSTANCE_ID
         )
         return match is not None
     finally:
@@ -872,8 +925,9 @@ async def increment_super_like_usage(from_user):
     conn = await get_db()
     try:
         await conn.execute(
-            "UPDATE users SET super_likes_used = COALESCE(super_likes_used, 0) + 1 WHERE telegram_id = $1",
-            from_user
+            """UPDATE users SET super_likes_used = COALESCE(super_likes_used, 0) + 1 
+               WHERE telegram_id = $1 AND bot_instance = $2""",
+            from_user, BOT_INSTANCE_ID
         )
     finally:
         await conn.close()
@@ -888,15 +942,17 @@ async def get_pending_likes(telegram_id):
             SELECT u.telegram_id, u.username, u.full_name, u.gender, u.age, u.city,
                    u.interests, u.zodiac, u.goals, u.photo_file_id, u.photo_base64, l.created_at
             FROM likes l
-            JOIN users u ON u.telegram_id = l.from_user
+            JOIN users u ON u.telegram_id = l.from_user AND u.bot_instance = $2
             WHERE l.to_user = $1
+            AND l.bot_instance = $2
             AND NOT EXISTS (
                 SELECT 1 FROM matches m
-                WHERE (m.user1 = l.from_user AND m.user2 = l.to_user)
-                OR (m.user1 = l.to_user AND m.user2 = l.from_user)
+                WHERE ((m.user1 = l.from_user AND m.user2 = l.to_user)
+                OR (m.user1 = l.to_user AND m.user2 = l.from_user))
+                AND m.bot_instance = $2
             )
             ORDER BY l.created_at DESC
-        """, telegram_id)
+        """, telegram_id, BOT_INSTANCE_ID)
         return [dict(r) for r in rows]
     finally:
         await conn.close()
@@ -906,20 +962,24 @@ async def accept_like(telegram_id, from_user):
     conn = await get_db()
     try:
         like = await conn.fetchrow(
-            "SELECT id FROM likes WHERE from_user = $1 AND to_user = $2",
-            from_user, telegram_id
+            """SELECT id FROM likes 
+               WHERE from_user = $1 AND to_user = $2 AND bot_instance = $3""",
+            from_user, telegram_id, BOT_INSTANCE_ID
         )
         if not like:
             return None
 
         u1, u2 = min(from_user, telegram_id), max(from_user, telegram_id)
         row = await conn.fetchrow(
-            "INSERT INTO matches (user1, user2) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id",
-            u1, u2
+            """INSERT INTO matches (user1, user2, bot_instance) 
+               VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING id""",
+            u1, u2, BOT_INSTANCE_ID
         )
         if not row:
             row = await conn.fetchrow(
-                "SELECT id FROM matches WHERE user1 = $1 AND user2 = $2", u1, u2
+                """SELECT id FROM matches 
+                   WHERE user1 = $1 AND user2 = $2 AND bot_instance = $3""",
+                u1, u2, BOT_INSTANCE_ID
             )
         return row['id'] if row else None
     finally:
@@ -930,8 +990,9 @@ async def reject_like(telegram_id, from_user):
     conn = await get_db()
     try:
         result = await conn.execute(
-            "DELETE FROM likes WHERE from_user = $1 AND to_user = $2",
-            from_user, telegram_id
+            """DELETE FROM likes 
+               WHERE from_user = $1 AND to_user = $2 AND bot_instance = $3""",
+            from_user, telegram_id, BOT_INSTANCE_ID
         )
         return result == 'DELETE 1'
     finally:
@@ -952,9 +1013,9 @@ async def get_matches(telegram_id):
                     ELSE m.user1 = u.telegram_id
                 END
             )
-            WHERE m.user1 = $1 OR m.user2 = $1
+            WHERE (m.user1 = $1 OR m.user2 = $1) AND m.bot_instance = $2
             ORDER BY m.created_at DESC
-        """, telegram_id)
+        """, telegram_id, BOT_INSTANCE_ID)
         return [dict(r) for r in rows]
     finally:
         await conn.close()
@@ -965,12 +1026,15 @@ async def create_match(user1, user2):
     try:
         u1, u2 = min(user1, user2), max(user1, user2)
         row = await conn.fetchrow(
-            "INSERT INTO matches (user1, user2) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id",
-            u1, u2
+            """INSERT INTO matches (user1, user2, bot_instance) 
+               VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING id""",
+            u1, u2, BOT_INSTANCE_ID
         )
         if not row:
             row = await conn.fetchrow(
-                "SELECT id FROM matches WHERE user1 = $1 AND user2 = $2", u1, u2
+                """SELECT id FROM matches 
+                   WHERE user1 = $1 AND user2 = $2 AND bot_instance = $3""",
+                u1, u2, BOT_INSTANCE_ID
             )
         return row['id'] if row else None
     finally:
@@ -981,8 +1045,10 @@ async def get_chat_messages(match_id, limit=50):
     conn = await get_db()
     try:
         rows = await conn.fetch(
-            "SELECT * FROM chat_messages WHERE match_id = $1 ORDER BY created_at DESC LIMIT $2",
-            match_id, limit
+            """SELECT * FROM chat_messages 
+               WHERE match_id = $1 AND bot_instance = $2 
+               ORDER BY created_at DESC LIMIT $3""",
+            match_id, BOT_INSTANCE_ID, limit
         )
         return [dict(r) for r in rows][::-1]
     finally:
@@ -993,8 +1059,9 @@ async def send_chat_message(match_id, sender_id, message):
     conn = await get_db()
     try:
         await conn.execute(
-            "INSERT INTO chat_messages (match_id, sender_id, message) VALUES ($1, $2, $3)",
-            match_id, sender_id, message
+            """INSERT INTO chat_messages (match_id, sender_id, message, bot_instance) 
+               VALUES ($1, $2, $3, $4)""",
+            match_id, sender_id, message, BOT_INSTANCE_ID
         )
         return True
     except Exception:
@@ -1007,66 +1074,24 @@ async def mark_messages_read(match_id, reader_id):
     conn = await get_db()
     try:
         await conn.execute(
-            "UPDATE chat_messages SET is_read = TRUE WHERE match_id = $1 AND sender_id != $2",
-            match_id, reader_id
+            """UPDATE chat_messages SET is_read = TRUE 
+               WHERE match_id = $1 AND sender_id != $2 AND bot_instance = $3""",
+            match_id, reader_id, BOT_INSTANCE_ID
         )
     finally:
         await conn.close()
 
 
-# ========== ESKI REFERRAL FUNCTIONS (deprecated) ==========
-
-async def register_invite(inviter_id, invited_id):
-    """Deprecated - yangi process_referral ishlating"""
-    return await process_referral(inviter_id, invited_id)
-
-
-async def get_invite_count(telegram_id):
-    conn = await get_db()
-    try:
-        row = await conn.fetchrow(
-            "SELECT referral_count FROM referral_rewards WHERE telegram_id = $1", telegram_id
-        )
-        return row["referral_count"] if row else 0
-    finally:
-        await conn.close()
-
-
-async def set_group_subscribed(telegram_id, subscribed=True):
-    conn = await get_db()
-    try:
-        await conn.execute(
-            "UPDATE users SET group_subscribed = $1 WHERE telegram_id = $2",
-            subscribed, telegram_id
-        )
-        return True
-    except Exception:
-        return False
-    finally:
-        await conn.close()
-
-
-async def get_group_subscribed(telegram_id):
-    conn = await get_db()
-    try:
-        row = await conn.fetchrow(
-            "SELECT group_subscribed, friends_invited FROM users WHERE telegram_id = $1",
-            telegram_id
-        )
-        if row:
-            return {'group_subscribed': row['group_subscribed'], 'friends_invited': row['friends_invited']}
-        return {'group_subscribed': False, 'friends_invited': 0}
-    finally:
-        await conn.close()
-
+# ========== GROUP FUNCTIONS ==========
 
 async def get_group_invite_count(telegram_id):
     """Guruhga taklif qilinganlar sonini olish"""
     conn = await get_db()
     try:
         row = await conn.fetchrow(
-            "SELECT COUNT(*) as count FROM group_invites WHERE inviter_id = $1",
-            telegram_id
+            """SELECT COUNT(*) as count FROM group_invites 
+               WHERE inviter_id = $1 AND bot_instance = $2""",
+            telegram_id, BOT_INSTANCE_ID
         )
         return row['count'] if row else 0
     finally:
@@ -1080,10 +1105,10 @@ async def get_group_invitees(telegram_id):
         rows = await conn.fetch("""
             SELECT u.telegram_id, u.full_name, u.username
             FROM group_invites gi
-            JOIN users u ON u.telegram_id = gi.invited_id
-            WHERE gi.inviter_id = $1
+            JOIN users u ON u.telegram_id = gi.invited_id AND u.bot_instance = $2
+            WHERE gi.inviter_id = $1 AND gi.bot_instance = $2
             ORDER BY gi.invited_at DESC
-        """, telegram_id)
+        """, telegram_id, BOT_INSTANCE_ID)
         return [dict(r) for r in rows]
     finally:
         await conn.close()
@@ -1094,10 +1119,10 @@ async def record_group_invite(inviter_id, invited_id):
     conn = await get_db()
     try:
         await conn.execute("""
-            INSERT INTO group_invites (inviter_id, invited_id)
-            VALUES ($1, $2)
+            INSERT INTO group_invites (inviter_id, invited_id, bot_instance)
+            VALUES ($1, $2, $3)
             ON CONFLICT DO NOTHING
-        """, inviter_id, invited_id)
+        """, inviter_id, invited_id, BOT_INSTANCE_ID)
         return True, "Guruhga odam qo'shildi."
     except Exception as e:
         return False, str(e)
@@ -1110,10 +1135,10 @@ async def record_group_join(telegram_id, invited_by=None):
     conn = await get_db()
     try:
         await conn.execute("""
-            INSERT INTO group_members (telegram_id, invited_by)
-            VALUES ($1, $2)
+            INSERT INTO group_members (telegram_id, invited_by, bot_instance)
+            VALUES ($1, $2, $3)
             ON CONFLICT (telegram_id) DO NOTHING
-        """, telegram_id, invited_by)
+        """, telegram_id, invited_by, BOT_INSTANCE_ID)
     except Exception:
         pass
     finally:
