@@ -621,7 +621,6 @@ async def save_user(telegram_id, data):
     finally:
         await conn.close()
 
-
 async def get_user(telegram_id):
     conn = await get_db()
     try:
