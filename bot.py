@@ -1183,7 +1183,13 @@ async def save_profile_api(request):
             return web.json_response({'success': False, 'error': 'profile required'}, status=400)
         profile['telegram_id'] = int(telegram_id)
         profile['username'] = profile.get('username')
+        
+        logger.info(f"save_profile: telegram_id={telegram_id}, name={profile.get('full_name')}, gender={profile.get('gender')}")
+        
         success = await db.save_user(int(telegram_id), profile)
+        
+        logger.info(f"save_profile result: success={success}, telegram_id={telegram_id}")
+        
         if success:
             await db.touch_user_activity(int(telegram_id))
         return web.json_response({'success': success})
