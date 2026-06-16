@@ -575,12 +575,19 @@ async def get_daily_recommendations(telegram_id, limit=5):
 async def save_user(telegram_id, data):
     conn = await get_db()
     try:
+        interests = data.get("interests", []) or []
+        goals = data.get("goals", []) or []
+        if not isinstance(interests, list):
+            interests = list(interests)
+        if not isinstance(goals, list):
+            goals = list(goals)
+
         await conn.execute("""
             INSERT INTO users (
                 telegram_id, username, full_name, gender, age, city, about, interests,
                 zodiac, goals, photo_file_id, photo_base64, relationship_mode, ice_breaker, bot_instance
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10::text[], $11, $12, $13, $14, $15)
             ON CONFLICT (telegram_id) DO UPDATE SET
                 username = EXCLUDED.username,
                 full_name = EXCLUDED.full_name,
@@ -605,18 +612,21 @@ async def save_user(telegram_id, data):
             data.get("age"),
             data.get("city"),
             data.get("about"),
-            data.get("interests", []),
+            interests,
             data.get("zodiac"),
-            data.get("goals", []),
+            goals,
             data.get("photo_file_id"),
             data.get("photo_base64"),
             data.get("relationship_mode") or "romantic",
             data.get("ice_breaker"),
             BOT_INSTANCE_ID
         )
+        print(f"✅ save_user OK: telegram_id={telegram_id}")
         return True
     except Exception as e:
-        print(f"Error saving user: {e}")
+        print(f"❌ save_user ERROR: telegram_id={telegram_id}, error={e}", flush=True)
+        import traceback
+        traceback.print_exc()
         return False
     finally:
         await conn.close()
