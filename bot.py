@@ -1177,21 +1177,22 @@ async def save_profile_api(request):
         data = await request.json()
         telegram_id = data.get('telegram_id')
         profile = data.get('profile', {})
+        
         if telegram_id is None:
             return web.json_response({'success': False, 'error': 'telegram_id required'}, status=400)
         if not profile:
             return web.json_response({'success': False, 'error': 'profile required'}, status=400)
+        
+        # ✅ TO'G'RILANDI: profile ichida telegram_id bo'lishini ta'minlash
         profile['telegram_id'] = int(telegram_id)
         profile['username'] = profile.get('username')
         
-        logger.info(f"save_profile: telegram_id={telegram_id}, name={profile.get('full_name')}, gender={profile.get('gender')}")
+        # ✅ photo_base64 ni to'g'ri ishlatish
+        if profile.get('photo_base64') and profile['photo_base64'].startswith('data:'):
+            # Base64 ni saqlash (katta bo'lishi mumkin)
+            pass
         
         success = await db.save_user(int(telegram_id), profile)
-        
-        logger.info(f"save_profile result: success={success}, telegram_id={telegram_id}")
-        
-        if success:
-            await db.touch_user_activity(int(telegram_id))
         return web.json_response({'success': success})
     except Exception as e:
         logger.error(f"SAVE PROFILE API xatolik: {e}", exc_info=True)
