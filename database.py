@@ -522,12 +522,11 @@ async def touch_user_activity(telegram_id):
             return {'daily_streak': streak, 'last_active_date': today.isoformat()}
 
         await conn.execute(
-            """INSERT INTO users (telegram_id, daily_streak, last_active_date, bot_instance) 
-               VALUES ($1, 1, $2, $3) ON CONFLICT (telegram_id) DO UPDATE 
-               SET daily_streak = users.daily_streak + 1, last_active_date = EXCLUDED.last_active_date
-               WHERE users.bot_instance = $3""",
-            telegram_id, today, BOT_INSTANCE_ID
-        )
+                    """INSERT INTO users (telegram_id, daily_streak, last_active_date, bot_instance) 
+                    VALUES ($1, 1, $2, $3) ON CONFLICT (telegram_id) DO UPDATE 
+                    SET daily_streak = users.daily_streak + 1, last_active_date = EXCLUDED.last_active_date""",
+                    telegram_id, today, BOT_INSTANCE_ID
+                )
         return {'daily_streak': 1, 'last_active_date': today.isoformat()}
     finally:
         await conn.close()
@@ -598,7 +597,6 @@ async def save_user(telegram_id, data):
                 ice_breaker = COALESCE(EXCLUDED.ice_breaker, users.ice_breaker),
                 is_active = TRUE,
                 bot_instance = $15
-            WHERE users.bot_instance = $15
         """,
             telegram_id,
             data.get("username"),
